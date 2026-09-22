@@ -1,7 +1,10 @@
 package com.example.data
 
+import android.util.Log
 import com.example.R
 import com.example.model.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -9,6 +12,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class ServoraRepository {
+
+    // Firebase Cloud Firestore Repository Integration
+    val firestoreRepository = FirestoreRepository()
 
     // Global Settings
     val currencies = listOf(
@@ -387,7 +393,7 @@ class ServoraRepository {
     val selectedCategory: StateFlow<ServiceCategory?> = _selectedCategory.asStateFlow()
 
     // Categories
-    val categories = listOf(
+    val initialCategories = listOf(
         ServiceCategory("hvac", "Air Conditioning & HVAC", "ac_unit", "Installation, maintenance, gas refill, and cooling diagnostics", 45.0, isPopular = true, activeProsCount = 318),
         ServiceCategory("electrical", "Electrical / Electrician", "bolt", "Wiring, fuse boxes, lighting, short circuits, and safety audits", 40.0, isPopular = true, activeProsCount = 422),
         ServiceCategory("plumbing", "Plumbing", "water_drop", "Leak detection, pipe repairs, faucet installation, and clogs", 35.0, isPopular = true, activeProsCount = 295),
@@ -406,9 +412,12 @@ class ServoraRepository {
         ServiceCategory("handyman", "General Handyman", "build", "TV mounting, drywall patching, shelf hanging, and minor fixes", 30.0, isPopular = true, activeProsCount = 480),
         ServiceCategory("emergency", "Emergency Services 24/7", "crisis_alert", "Immediate response for electrical fires, bursts, and lockouts", 65.0, isEmergency = true, activeProsCount = 94)
     )
+    private val _categoriesFlow = MutableStateFlow(initialCategories)
+    val categoriesFlow: StateFlow<List<ServiceCategory>> = _categoriesFlow.asStateFlow()
+    val categories: List<ServiceCategory> get() = _categoriesFlow.value
 
     // Emergency Types
-    val emergencyTypes = listOf(
+    val initialEmergencyTypes = listOf(
         EmergencyServiceType("em_leak", "Water Leak / Pipe Burst", "water_drop", "Urgent shutoff & pipeline repair", 14, 65.0),
         EmergencyServiceType("em_power", "Power Outage / Sparks", "bolt", "Urgent breaker trip, short circuit, or panel failure", 12, 70.0),
         EmergencyServiceType("em_lock", "Locked Out", "lock_clock", "Non-destructive emergency entry assistance", 10, 60.0),
@@ -416,9 +425,12 @@ class ServoraRepository {
         EmergencyServiceType("em_fire", "Electrical Hazard", "local_fire_department", "Smoldering socket or burning smell isolation", 10, 80.0),
         EmergencyServiceType("em_security", "Security Breach / Alarm", "security", "Broken sensor, breached perimeter lock, or CCTV reboot", 15, 75.0)
     )
+    private val _emergencyTypesFlow = MutableStateFlow(initialEmergencyTypes)
+    val emergencyTypesFlow: StateFlow<List<EmergencyServiceType>> = _emergencyTypesFlow.asStateFlow()
+    val emergencyTypes: List<EmergencyServiceType> get() = _emergencyTypesFlow.value
 
     // Professionals dataset
-    val professionals = listOf(
+    val initialProfessionals = listOf(
         Professional(
             id = "pro_1",
             name = "Alex Morgan",
@@ -595,6 +607,9 @@ class ServoraRepository {
             avatarRes = null
         )
     )
+    private val _professionalsFlow = MutableStateFlow(initialProfessionals)
+    val professionalsFlow: StateFlow<List<Professional>> = _professionalsFlow.asStateFlow()
+    val professionals: List<Professional> get() = _professionalsFlow.value
 
     // Active Bookings Flow
     private val _bookings = MutableStateFlow<List<Booking>>(
@@ -602,7 +617,7 @@ class ServoraRepository {
             Booking(
                 id = "SRV-89421",
                 serviceCategoryName = "Air Conditioning & HVAC",
-                professional = professionals[0], // Alex Morgan
+                professional = initialProfessionals[0], // Alex Morgan
                 status = BookingStatus.ON_THE_WAY,
                 progressStep = JobProgressStep.JOB_STARTED,
                 scheduledDate = "Today",
@@ -1125,6 +1140,107 @@ class ServoraRepository {
             "IDR" -> "Rp " + String.format(Locale.US, "%,d", converted.toLong()).replace(',', '.')
             "JPY" -> "${curr.symbol}${converted.toInt()}"
             else -> "${curr.symbol}${String.format(Locale.US, "%.2f", converted)}"
+        }
+    }
+
+    // ==========================================
+    // FIRESTORE SYNCHRONIZATION & STORAGE
+    // ==========================================
+
+    fun syncWithFirestore(coroutineScope: CoroutineScope) {
+        if (!firestoreRepository.isAvailable()) {
+            Log.i("ServoraRepository", "Firestore is in offline/standby mode")
+            return
+        }
+
+        coroutineScope.launch {
+            firestoreRepository.getProfessionalsFlow(fallbackList = initialProfessionals)
+                .collect { pros ->
+                    if (pros.isNotEmpty()) {
+                        _professionalsFlow.value = pros
+                    }
+                }
+        }
+
+        coroutineScope.launch {
+            firestoreRepository.getCategoriesFlow(fallbackList = initialCategories)
+                .collect { cats ->
+                    if (cats.isNotEmpty()) {
+                        _categoriesFlow.value = cats
+                    }
+                }
+        }
+
+        coroutineScope.launch {
+            firestoreRepository.getEmergencyServicesFlow(fallbackList = initialEmergencyTypes)
+                .collect { ems ->
+                    if (ems.isNotEmpty()) {
+                        _emergencyTypesFlow.value = ems
+                    }
+                }
+        }
+    }
+
+    suspend fun saveProfessional(professional: Professional): Result<Unit> {
+        val current = _professionalsFlow.value.toMutableList()
+        val index = current.indexOfFirst { it.id == professional.id }
+        if (index != -1) {
+            current[index] = professional
+        } else {
+            current.add(0, professional)
+        }
+        _professionalsFlow.value = current
+
+        return if (firestoreRepository.isAvailable()) {
+            firestoreRepository.saveProfessional(professional)
+        } else {
+            Result.success(Unit)
+        }
+    }
+
+    suspend fun saveCategory(category: ServiceCategory): Result<Unit> {
+        val current = _categoriesFlow.value.toMutableList()
+        val index = current.indexOfFirst { it.id == category.id }
+        if (index != -1) {
+            current[index] = category
+        } else {
+            current.add(category)
+        }
+        _categoriesFlow.value = current
+
+        return if (firestoreRepository.isAvailable()) {
+            firestoreRepository.saveCategory(category)
+        } else {
+            Result.success(Unit)
+        }
+    }
+
+    suspend fun saveEmergencyService(service: EmergencyServiceType): Result<Unit> {
+        val current = _emergencyTypesFlow.value.toMutableList()
+        val index = current.indexOfFirst { it.id == service.id }
+        if (index != -1) {
+            current[index] = service
+        } else {
+            current.add(service)
+        }
+        _emergencyTypesFlow.value = current
+
+        return if (firestoreRepository.isAvailable()) {
+            firestoreRepository.saveEmergencyService(service)
+        } else {
+            Result.success(Unit)
+        }
+    }
+
+    suspend fun seedInitialDataToFirestore(): Result<String> {
+        return if (firestoreRepository.isAvailable()) {
+            firestoreRepository.seedInitialData(
+                professionals = initialProfessionals,
+                categories = initialCategories,
+                emergencies = initialEmergencyTypes
+            )
+        } else {
+            Result.failure(IllegalStateException("Firestore is not available (running in offline mode)"))
         }
     }
 }

@@ -35,6 +35,8 @@ fun DeveloperConsoleScreen(
 ) {
     val featureFlags by viewModel.securityFeatureFlags.collectAsState()
     val auditLogs by viewModel.systemAuditLogs.collectAsState()
+    val firestoreSyncStatus by viewModel.firestoreSyncStatus.collectAsState()
+    val isSyncingFirestore by viewModel.isSyncingFirestore.collectAsState()
     var selectedTab by remember { mutableStateOf(0) } // 0: Security Flags, 1: Audit Logs, 2: API & Telemetry, 3: Sandbox
     var showResetSnackbar by remember { mutableStateOf(false) }
 
@@ -295,6 +297,16 @@ fun DeveloperConsoleScreen(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         TelemetryCard(
+                            title = "Firebase Cloud Firestore",
+                            status = if (viewModel.isFirestoreAvailable) "ONLINE & ACTIVE" else "STANDBY / OFFLINE",
+                            statusColor = if (viewModel.isFirestoreAvailable) EmeraldTrust else AmberWarning,
+                            latency = "28ms",
+                            detail = "Persists professionals, service categories, and 24/7 emergency dispatch types. Uses reactive Flow listeners for real-time document sync."
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        TelemetryCard(
                             title = "Google Play Policy & Permission Guard",
                             status = "COMPLIANT",
                             statusColor = EmeraldTrust,
@@ -388,6 +400,77 @@ fun DeveloperConsoleScreen(
                                     Icon(Icons.Default.Shield, contentDescription = null, tint = CoralRed, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Trigger Test Security Rejection", color = CoralRed, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                            border = BorderStroke(1.dp, if (viewModel.isFirestoreAvailable) CyanAccent.copy(alpha = 0.4f) else SlateBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Firebase Firestore Cloud Sync",
+                                        color = TextPrimary,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                if (viewModel.isFirestoreAvailable) EmeraldTrust.copy(alpha = 0.15f)
+                                                else AmberWarning.copy(alpha = 0.15f)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (viewModel.isFirestoreAvailable) "ONLINE" else "OFFLINE",
+                                            color = if (viewModel.isFirestoreAvailable) EmeraldTrust else AmberWarning,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Status: $firestoreSyncStatus",
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(
+                                    onClick = {
+                                        viewModel.syncFirestoreData()
+                                    },
+                                    enabled = !isSyncingFirestore,
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (isSyncingFirestore) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = DeepNavy,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Syncing to Firestore...", color = DeepNavy, fontWeight = FontWeight.Bold)
+                                    } else {
+                                        Icon(Icons.Default.CloudSync, contentDescription = null, tint = DeepNavy, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Sync & Seed to Firestore", color = DeepNavy, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }

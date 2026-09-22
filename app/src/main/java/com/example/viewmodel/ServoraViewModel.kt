@@ -51,6 +51,9 @@ class ServoraViewModel(
     val categories = repository.categories
     val emergencyTypes = repository.emergencyTypes
     val professionals = repository.professionals
+    val professionalsFlow = repository.professionalsFlow
+    val categoriesFlow = repository.categoriesFlow
+    val emergencyTypesFlow = repository.emergencyTypesFlow
     val bookings = repository.bookings
     val messages = repository.messages
     val savedProIds = repository.savedProIds
@@ -71,13 +74,21 @@ class ServoraViewModel(
     val adminPendingDisputes = repository.adminPendingDisputes
     val adminVerificationQueue = repository.adminVerificationQueue
 
+    // Firestore Integration State
+    val isFirestoreAvailable = repository.firestoreRepository.isAvailable()
+    val firestoreSyncStatus = MutableStateFlow<String>(
+        if (repository.firestoreRepository.isAvailable()) "Connected • Real-time Sync Active"
+        else "Standby (Local Fallback Mode)"
+    )
+    val isSyncingFirestore = MutableStateFlow(false)
+
     // Marketplace Filters
     private val _filters = MutableStateFlow(MarketplaceFilters())
     val filters: StateFlow<MarketplaceFilters> = _filters.asStateFlow()
 
-    // Filtered Pros
+    // Filtered Pros (Updated in real-time as Firestore documents change)
     val filteredProfessionals: StateFlow<List<Professional>> = combine(
-        flowOf(repository.professionals),
+        repository.professionalsFlow,
         _filters
     ) { pros, filter ->
         pros.filter { pro ->
@@ -132,9 +143,45 @@ class ServoraViewModel(
     val activeTrackingBooking: StateFlow<Booking?> = _activeTrackingBooking.asStateFlow()
 
     init {
+        // Start Firestore real-time synchronization
+        repository.syncWithFirestore(viewModelScope)
+
         // Set first booking as default tracked booking if available
         if (repository.bookings.value.isNotEmpty()) {
             _activeTrackingBooking.value = repository.bookings.value.first()
+        }
+    }
+
+    // Firestore Synchronization & Management
+    fun syncFirestoreData() {
+        viewModelScope.launch {
+            isSyncingFirestore.value = true
+            firestoreSyncStatus.value = "Syncing profiles & services to Firestore..."
+            val result = repository.seedInitialDataToFirestore()
+            isSyncingFirestore.value = false
+            firestoreSyncStatus.value = if (result.isSuccess) {
+                result.getOrNull() ?: "Successfully synced to Firestore"
+            } else {
+                "Offline Mode: ${result.exceptionOrNull()?.message ?: "Check configuration"}"
+            }
+        }
+    }
+
+    fun saveProfessionalProfile(pro: Professional) {
+        viewModelScope.launch {
+            repository.saveProfessional(pro)
+        }
+    }
+
+    fun saveServiceCategory(category: ServiceCategory) {
+        viewModelScope.launch {
+            repository.saveCategory(category)
+        }
+    }
+
+    fun saveEmergencyService(service: EmergencyServiceType) {
+        viewModelScope.launch {
+            repository.saveEmergencyService(service)
         }
     }
 
